@@ -1,12 +1,16 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using System.Diagnostics;
+using System.Text;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.Azure.ServiceBus;
 using Microsoft.eShopWeb.ApplicationCore.Entities.OrderAggregate;
 using Microsoft.eShopWeb.ApplicationCore.Exceptions;
 using Microsoft.eShopWeb.ApplicationCore.Interfaces;
 using Microsoft.eShopWeb.Infrastructure.Identity;
 using Microsoft.eShopWeb.Web.Interfaces;
+using Newtonsoft.Json;
 
 namespace Microsoft.eShopWeb.Web.Pages.Basket;
 
@@ -16,7 +20,7 @@ public class CheckoutModel : PageModel
     private readonly IBasketService _basketService;
     private readonly SignInManager<ApplicationUser> _signInManager;
     private readonly IOrderService _orderService;
-    private string? _username = null;
+    private string _username = null;
     private readonly IBasketViewModelService _basketViewModelService;
     private readonly IAppLogger<CheckoutModel> _logger;
 
@@ -55,6 +59,15 @@ public class CheckoutModel : PageModel
             await _basketService.SetQuantities(BasketModel.Id, updateModel);
             await _orderService.CreateOrderAsync(BasketModel.Id, new Address("123 Main St.", "Kent", "OH", "United States", "44240"));
             await _basketService.DeleteBasketAsync(BasketModel.Id);
+
+            var msg = JsonConvert.SerializeObject(updateModel);
+            await ServiceBusOrderSender(msg);
+
+            var functionUrl = "https://reservationoforderitems.azurewebsites.net/api/ReservationOfOrderItems?";
+            var functionClient = new HttpClient();
+            var responce = await functionClient.PostAsJsonAsync(functionUrl, updateModel);
+            var ret = await responce.Content.ReadAsStringAsync();
+
         }
         catch (EmptyBasketOnCheckoutException emptyBasketOnCheckoutException)
         {
@@ -64,6 +77,24 @@ public class CheckoutModel : PageModel
         }
 
         return RedirectToPage("Success");
+    }
+
+    private async Task ServiceBusOrderSender(string msg)
+    {
+        const string ServiceBusConnectionString = "Endpoint=sb://eshopservicebus2022.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=vvQEuCtRq3jS2zw5256XYEZUAk71jAJM6G3YatrKvrY=";
+        const string QueueName = "OrderRequests";
+        var queueClient = new QueueClient(ServiceBusConnectionString, QueueName);
+
+        try
+        {
+            var message = new Message(Encoding.UTF8.GetBytes(msg));
+            await queueClient.SendAsync(message);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex.Message);
+        }
+        await queueClient.CloseAsync();
     }
 
     private async Task SetBasketModelAsync()
