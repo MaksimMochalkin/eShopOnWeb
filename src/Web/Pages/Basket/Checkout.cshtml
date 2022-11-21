@@ -3,6 +3,9 @@
 @{
     ViewData["Title"] = "Checkout";
 }
+@{
+    string shippingAddress = string.Empty;
+}
 <section class="esh-catalog-hero">
     <div class="container">
         <img class="esh-catalog-title" src="~/images/main_banner_text.png" />
@@ -14,6 +17,10 @@
     @if (Model.BasketModel.Items.Any())
     {
         <form asp-page="Checkout" method="post">
+            <div>
+                @Html.LabelFor(m => shippingAddress, "Shipping address")
+                @Html.EditorFor(m => shippingAddress, new { htmlAttributes = new { @class = "input-deliveryAddress" } })
+            </div>
             <article class="esh-basket-titles row">
                 <br />
                 <section class="esh-basket-title col-xs-3">Product</section>
@@ -42,7 +49,6 @@
                             <section class="esh-basket-item esh-basket-item--middle esh-basket-item--mark col-xs-2">$ @Math.Round(item.Quantity * item.UnitPrice, 2).ToString("N2")</section>
                         </div>
                         <div class="row">
-
                         </div>
                     </article>
                 }

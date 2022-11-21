@@ -21,7 +21,7 @@
     },
     "resourceName": {
       "type": "string",
-      "defaultValue": "eShop-WE",
+      "defaultValue": "finaltaskeshop1Dev",
       "metadata": {
         "description": "Name of the main resource to be created by this template."
       }
