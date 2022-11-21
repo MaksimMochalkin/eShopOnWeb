@@ -11,6 +11,7 @@ using Microsoft.eShopWeb.ApplicationCore.Interfaces;
 using Microsoft.eShopWeb.Infrastructure.Identity;
 using Microsoft.eShopWeb.Web.Interfaces;
 using Newtonsoft.Json;
+using OrderItemsDeliveryService;
 
 namespace Microsoft.eShopWeb.Web.Pages.Basket;
 
@@ -44,7 +45,7 @@ public class CheckoutModel : PageModel
         await SetBasketModelAsync();
     }
 
-    public async Task<IActionResult> OnPost(IEnumerable<BasketItemViewModel> items)
+    public async Task<IActionResult> OnPost(IEnumerable<BasketItemViewModel> items, string shippingAddress)
     {
         try
         {
@@ -60,13 +61,9 @@ public class CheckoutModel : PageModel
             await _orderService.CreateOrderAsync(BasketModel.Id, new Address("123 Main St.", "Kent", "OH", "United States", "44240"));
             await _basketService.DeleteBasketAsync(BasketModel.Id);
 
-            var msg = JsonConvert.SerializeObject(updateModel);
-            await ServiceBusOrderSender(msg);
+            await SendDataIntoDeliveryOrderProcessor(shippingAddress, updateModel);
 
-            var functionUrl = "https://reservationoforderitems.azurewebsites.net/api/ReservationOfOrderItems?";
-            var functionClient = new HttpClient();
-            var responce = await functionClient.PostAsJsonAsync(functionUrl, updateModel);
-            var ret = await responce.Content.ReadAsStringAsync();
+            await SendDataIntoServiceBus(updateModel);
 
         }
         catch (EmptyBasketOnCheckoutException emptyBasketOnCheckoutException)
@@ -79,11 +76,39 @@ public class CheckoutModel : PageModel
         return RedirectToPage("Success");
     }
 
+    private async Task SendDataIntoDeliveryOrderProcessor(string shippingAddress, Dictionary<string, int> updateModel)
+    {
+        var deliveryOrderProcessorUri = Environment.GetEnvironmentVariable("DeliveryOrderProcessorUri");
+        var functionUrl = deliveryOrderProcessorUri + "/api/OrderItemsDeliveryServiceRun?";
+        var functionClient = new HttpClient();
+        var response = await functionClient.PostAsJsonAsync(functionUrl,
+            new OrderDeliveryModel
+            {
+                Id = Guid.NewGuid().ToString(),
+                ShippingAddress = shippingAddress,
+                ListOfItems = updateModel,
+                FinalPrice = BasketModel.Total()
+            });
+        await response.Content.ReadAsStringAsync();
+    }
+
+    private async Task SendDataIntoServiceBus(Dictionary<string, int> updateModel)
+    {
+        var msg = JsonConvert.SerializeObject(updateModel);
+        await ServiceBusOrderSender(msg);
+
+        var orderItemsReserverUri = Environment.GetEnvironmentVariable("OrderItemsReserverUri");
+        var functionUrl = orderItemsReserverUri + "/api/ReservationOfOrderItems?";
+        var functionClient = new HttpClient();
+        var responce = await functionClient.PostAsJsonAsync(functionUrl, updateModel);
+        await responce.Content.ReadAsStringAsync();
+    }
+
     private async Task ServiceBusOrderSender(string msg)
     {
-        const string ServiceBusConnectionString = "Endpoint=sb://eshopservicebus2022.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=vvQEuCtRq3jS2zw5256XYEZUAk71jAJM6G3YatrKvrY=";
-        const string QueueName = "OrderRequests";
-        var queueClient = new QueueClient(ServiceBusConnectionString, QueueName);
+        var serviceBusConnectionString = Environment.GetEnvironmentVariable("ServiceBusConnectionString");
+        var queueName = Environment.GetEnvironmentVariable("ServiceBusQueueName");
+        var queueClient = new QueueClient(serviceBusConnectionString, queueName);
 
         try
         {
